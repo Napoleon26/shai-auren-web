@@ -26,3 +26,22 @@ $('save-bet').onsubmit=e=>{e.preventDefault();run(e.submitter,async()=>{if(!revi
 let moveID=crypto.randomUUID();$('movement').oninput=()=>moveID=crypto.randomUUID();$('movement').onsubmit=e=>{e.preventDefault();run(e.submitter,async()=>{await api('move',{movement:{kind:$('kind').value,day:$('day').value,amount_cents:Math.round(Number($('amount').value)*100),request_id:moveID}});moveID=crypto.randomUUID();$('amount').value='';await ledger();message('Movimiento guardado.');});};$('open-ledger').onclick=e=>run(e.target,async()=>{$('ledger').hidden=false;await ledger();$('ledger').scrollIntoView({behavior:'smooth'});});$('period').onchange=summary;
 account().catch(e=>message(e.message));setInterval(async()=>{if(!token)return;try{const a=await api('account');if(!a.allowed){$('app').hidden=true;$('pending').hidden=false;$('pending').textContent='El acceso está pendiente, vencido o revocado.';}else if($('app').hidden)await account();}catch(e){message(e.message);}},30000);
 
+// Published picks are produced and frozen by the background worker, not this page.
+const gameNav=document.createElement('button');gameNav.textContent='Cerebro de juego';document.querySelector('#app nav').append(gameNav);
+const gamePanel=document.createElement('section');gamePanel.id='game-panel';gamePanel.className='card';gamePanel.hidden=true;document.querySelector('#app nav').after(gamePanel);
+function cloudGame(){
+ const shown=matches.filter(m=>!$('league').value||m.league===$('league').value);
+ const picks=shown.filter(m=>m.payload.game).map(m=>({m,p:m.payload.game}));
+ gamePanel.innerHTML=`<h2>Cerebro de juego</h2><p>Mayor probabilidad disponible por partido. Una línea extrema puede pagar muy poco: probabilidad alta no significa rentabilidad. Selecciones guardadas antes del inicio; no se recalculan con el resultado.</p><p>${picks.filter(x=>x.p.result===1).length} acertadas · ${picks.filter(x=>x.p.result===0).length} falladas · ${picks.filter(x=>x.p.result==null).length} pendientes · ${shown.length-picks.length} sin recomendación previa. Resumen del filtro actual.</p><button id="game-combine">Preparar combinada con las marcadas</button><p>Marca de dos a ocho partidos. Después introduce la cuota real y verifica; no hay probabilidad conjunta validada ni importe seguro.</p>`+picks.map(({m,p})=>`<article class="card"><label><input type="checkbox" data-game-key="${esc(m.match_key)}" ${p.selectable?'':'disabled'}>${esc(p.match)} · ${esc(p.day)}</label><strong>${esc(p.label)}</strong><p>${pct(p.probability)} · Cuota de equilibrio ${num(p.fair_odds)} · ${p.result===1?'Acertada':p.result===0?'Fallada':'Pendiente'}</p><small>${esc(p.quality)} · Guardada ${esc(p.created)}.</small><button data-game-single="${esc(m.match_key)}" ${p.selectable?'':'disabled'}>Preparar apuesta simple</button></article>`).join('');
+ $('game-combine').onclick=()=>{const keys=[...gamePanel.querySelectorAll('[data-game-key]:checked')].map(x=>x.dataset.gameKey);if(keys.length<2||keys.length>8){message('Marca entre dos y ocho partidos.');return;}gameTransfer(keys);};
+ gamePanel.querySelectorAll('[data-game-single]').forEach(b=>b.onclick=()=>gameTransfer([b.dataset.gameSingle]));
+}
+async function gameTransfer(keys){
+ legs=keys.map(k=>{const m=matches.find(x=>x.match_key===k);return {...m.payload.game.leg,key:k,match:m.home+' – '+m.away};});renderLegs();$('odds').value='';$('odds').focus();$('odds').scrollIntoView({behavior:'smooth'});$('ledger').hidden=false;try{await ledger();}catch(e){message(e.message);}message('Selección preparada. Comprueba la cuota actual y verifica antes de registrar. El bank se registra como depósito / saldo inicial.');
+}
+gameNav.onclick=()=>{gamePanel.hidden=!gamePanel.hidden;if(!gamePanel.hidden){cloudGame();gamePanel.scrollIntoView({behavior:'smooth'});}};
+const beforeGameRender=renderMatches;renderMatches=function(){beforeGameRender();if(!gamePanel.hidden)cloudGame();};
+$('stake').insertAdjacentHTML('afterend','<p id="game-risk"></p>');
+$('stake').addEventListener('input',()=>{const bank=entries.reduce((s,r)=>s+(r.kind==='deposito'?r.amount_cents:r.kind==='retiro'?-r.amount_cents:-r.amount_cents+(r.returned_cents||0)),0),stake=Number($('stake').value)*100;$('game-risk').textContent=bank>0?`Bank ${sol(bank)} · Exposición ${(stake/bank*100).toFixed(1)}% · Si pierdes, saldo ${sol(bank-stake)}.`:'Registra primero tu bank en Mi registro.';});
+
+
